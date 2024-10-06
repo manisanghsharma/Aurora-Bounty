@@ -17,23 +17,30 @@ export default function CourseStore() {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState("");
 	const [success, setSuccess] = useState("");
+	const [purchasedCourses, setPurchasedCourses] = useState({});
+	const [coursePrices, setCoursePrices] = useState({});
 
 	useEffect(() => {
 		connectWallet();
 	}, []);
 
+	useEffect(() => {
+		if (contract && account) {
+			checkPurchasedCourses();
+			getCoursePrices();
+		}
+	}, [contract, account]);
+
 	const connectWallet = async () => {
 		try {
 			if (window.ethereum) {
-				console.log("Ethereum object found");
-
 				const accounts = await window.ethereum.request({
 					method: "eth_requestAccounts",
 				});
-				console.log("Accounts:", accounts);
 
 				const provider = new ethers.BrowserProvider(window.ethereum);
 				const signer = await provider.getSigner();
+
 				const contractInstance = new ethers.Contract(
 					CONTRACT_ADDRESS,
 					abi,
@@ -42,14 +49,49 @@ export default function CourseStore() {
 
 				setAccount(accounts[0]);
 				setContract(contractInstance);
-				console.log("Wallet connected");
 			} else {
 				setError("Please install MetaMask to use this app");
-				console.log("MetaMask not installed");
 			}
 		} catch (err) {
 			setError("Failed to connect wallet: " + err.message);
-			console.error("Error connecting wallet:", err);
+		}
+	};
+
+	const checkPurchasedCourses = async () => {
+		try {
+			const courseAccessPromises = [1, 2, 3, 4, 5].map((courseId) =>
+				contract.hasAccess(account, courseId)
+			);
+
+			const accessResults = await Promise.all(courseAccessPromises);
+
+			const purchasedStatus = accessResults.reduce((acc, hasAccess, index) => {
+				acc[index + 1] = hasAccess;
+				return acc;
+			}, {});
+
+			setPurchasedCourses(purchasedStatus);
+		} catch (err) {
+			console.error("Error checking purchased courses:", err);
+		}
+	};
+
+	const getCoursePrices = async () => {
+		try {
+			const pricePromises = [1, 2, 3, 4, 5].map((courseId) =>
+				contract.getCoursePrice(courseId)
+			);
+
+			const prices = await Promise.all(pricePromises);
+
+			const priceMap = prices.reduce((acc, price, index) => {
+				acc[index + 1] = price;
+				return acc;
+			}, {});
+
+			setCoursePrices(priceMap);
+		} catch (err) {
+			console.error("Error getting course prices:", err);
 		}
 	};
 
@@ -59,7 +101,7 @@ export default function CourseStore() {
 			setError("");
 			setSuccess("");
 
-			const price = await contract.getCoursePrice(courseId);
+			const price = coursePrices[courseId];
 
 			const tx = await contract.purchaseCourse(courseId, {
 				value: price,
@@ -67,12 +109,23 @@ export default function CourseStore() {
 
 			await tx.wait();
 
+			// Update the purchased status for this course
+			setPurchasedCourses((prev) => ({
+				...prev,
+				[courseId]: true,
+			}));
+
 			setSuccess(`Successfully purchased course ${courseId}!`);
 		} catch (err) {
 			setError("Failed to purchase course: " + err.message);
 		} finally {
 			setLoading(false);
 		}
+	};
+
+	const formatPrice = (price) => {
+		if (!price) return "Loading...";
+		return `${ethers.formatEther(price)} ETH`;
 	};
 
 	return (
@@ -102,17 +155,34 @@ export default function CourseStore() {
 									<h3 className='text-lg font-semibold mb-2'>
 										Course {courseId}
 									</h3>
+									<p className='text-gray-600 mb-2'>
+										Price: {formatPrice(coursePrices[courseId])}
+									</p>
 									<button
 										onClick={() => purchaseCourse(courseId)}
-										disabled={loading}
-										className='w-full bg-green-500 text-white p-2 rounded-md flex items-center justify-center hover:bg-green-600 disabled:bg-gray-300'
+										disabled={loading || purchasedCourses[courseId]}
+										className={`w-full p-2 rounded-md flex items-center justify-center ${
+											purchasedCourses[courseId]
+												? "bg-gray-300 text-gray-600 cursor-not-allowed"
+												: "bg-green-500 text-white hover:bg-green-600"
+										}`}
 									>
 										{loading ? (
-											<Loader className='animate-spin mr-2' />
+											<>
+												<Loader className='animate-spin mr-2' />
+												Processing...
+											</>
+										) : purchasedCourses[courseId] ? (
+											<>
+												<CheckCircle2 className='mr-2' />
+												Purchased
+											</>
 										) : (
-											<ShoppingCart className='mr-2' />
+											<>
+												<ShoppingCart className='mr-2' />
+												Buy Course
+											</>
 										)}
-										{loading ? "Processing..." : `Buy Course ${courseId}`}
 									</button>
 								</div>
 							))}
