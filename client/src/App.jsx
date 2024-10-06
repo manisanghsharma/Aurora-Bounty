@@ -8,6 +8,7 @@ import {
 	CheckCircle2,
 	Loader,
 } from "lucide-react";
+import toast, { Toaster } from "react-hot-toast";
 
 const CONTRACT_ADDRESS = "0x390BdF96BE37813D2f078bbA98479545134151c6";
 
@@ -22,6 +23,18 @@ export default function CourseStore() {
 
 	useEffect(() => {
 		connectWallet();
+
+		// Add event listeners for account changes
+		if (window.ethereum) {
+			window.ethereum.on("accountsChanged", handleAccountChange);
+		}
+
+		// Cleanup function
+		return () => {
+			if (window.ethereum) {
+				window.ethereum.removeListener("accountsChanged", handleAccountChange);
+			}
+		};
 	}, []);
 
 	useEffect(() => {
@@ -31,9 +44,40 @@ export default function CourseStore() {
 		}
 	}, [contract, account]);
 
+	const handleAccountChange = async (accounts) => {
+		if (accounts.length === 0) {
+			// User disconnected their wallet
+			setAccount("");
+			setPurchasedCourses({});
+			toast.error("Wallet disconnected");
+		} else if (accounts[0] !== account) {
+			// User switched accounts
+			const newAccount = accounts[0];
+			setAccount(newAccount);
+			toast("Wallet account changed", {
+				icon: "👛",
+				description: `${newAccount.slice(0, 6)}...${newAccount.slice(-4)}`,
+			});
+
+			// Reconnect contract with new account
+			if (window.ethereum) {
+				const provider = new ethers.BrowserProvider(window.ethereum);
+				const signer = await provider.getSigner();
+				const contractInstance = new ethers.Contract(
+					CONTRACT_ADDRESS,
+					abi,
+					signer
+				);
+				setContract(contractInstance);
+			}
+		}
+	};
+
 	const connectWallet = async () => {
 		try {
 			if (window.ethereum) {
+				const connectToast = toast.loading("Connecting wallet...");
+
 				const accounts = await window.ethereum.request({
 					method: "eth_requestAccounts",
 				});
@@ -49,11 +93,17 @@ export default function CourseStore() {
 
 				setAccount(accounts[0]);
 				setContract(contractInstance);
+
+				toast.success("Wallet connected successfully", {
+					id: connectToast,
+					icon: "✅",
+					description: `${accounts[0].slice(0, 6)}...${accounts[0].slice(-4)}`,
+				});
 			} else {
-				setError("Please install MetaMask to use this app");
+				toast.error("Please install MetaMask to use this app");
 			}
 		} catch (err) {
-			setError("Failed to connect wallet: " + err.message);
+			toast.error("Failed to connect wallet: " + err.message);
 		}
 	};
 
@@ -98,8 +148,7 @@ export default function CourseStore() {
 	const purchaseCourse = async (courseId) => {
 		try {
 			setLoading(true);
-			setError("");
-			setSuccess("");
+			const purchaseToast = toast.loading("Processing purchase...");
 
 			const price = coursePrices[courseId];
 
@@ -115,9 +164,11 @@ export default function CourseStore() {
 				[courseId]: true,
 			}));
 
-			setSuccess(`Successfully purchased course ${courseId}!`);
+			toast.success(`Successfully purchased course ${courseId}!`, {
+				id: purchaseToast,
+			});
 		} catch (err) {
-			setError("Failed to purchase course: " + err.message);
+			toast.error("Failed to purchase course: " + err.message);
 		} finally {
 			setLoading(false);
 		}
@@ -130,6 +181,7 @@ export default function CourseStore() {
 
 	return (
 		<div className='max-w-4xl mx-auto p-4'>
+			<Toaster position='top-right' />
 			<div className='bg-white rounded-lg shadow-md p-6'>
 				<h1 className='text-2xl font-bold mb-4 flex items-center'>
 					<ShoppingCart className='mr-2' /> SkillMint Course Store
@@ -187,18 +239,6 @@ export default function CourseStore() {
 								</div>
 							))}
 						</div>
-
-						{error && (
-							<div className='mt-4 p-2 bg-red-100 text-red-700 rounded-md flex items-center'>
-								<AlertCircle className='mr-2' /> {error}
-							</div>
-						)}
-
-						{success && (
-							<div className='mt-4 p-2 bg-green-100 text-green-700 rounded-md flex items-center'>
-								<CheckCircle2 className='mr-2' /> {success}
-							</div>
-						)}
 					</div>
 				)}
 			</div>
